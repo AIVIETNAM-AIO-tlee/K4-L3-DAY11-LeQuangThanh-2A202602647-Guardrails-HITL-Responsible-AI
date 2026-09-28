@@ -51,14 +51,54 @@ def detect_injection(user_input: str) -> InputStatus:
     Returns:
         ``"BLOCK"`` if injection detected (chặn), ``"ALLOW"`` otherwise (cho qua).
     """
+    cleaned = re.sub(r"[\u200b\u200c\u200d\ufeff\u2060]", "", user_input)
     INJECTION_PATTERNS = [
-        # TODO: Add at least 5 regex patterns
-        # Example:
-        # r"ignore (all )?(previous|above) instructions",
+        # Instruction overrides & jailbreaks
+        r"ignore\s+(all\s+)?(previous|above|prior)?\s*instructions?",
+        r"disregard\s+(all\s+)?(previous|above|prior)?\s*(instructions?|rules?|directives?)",
+        r"forget\s+(your\s+)?(instructions?|rules?|prompt)",
+        r"override\s+(your\s+)?(system\s+)?(prompt|instructions?)",
+        r"you\s+are\s+now\b",
+        r"\bDAN\b",
+        r"pretend\s+(you\s+are|to\s+be)",
+        r"act\s+as\s+(a\s+|an\s+)?(unrestricted|evil|jailbroken)",
+        r"role\s*play\s+as",
+        r"system\s+prompt",
+        r"reveal\s+(the\s+|your\s+)?(instructions?|prompt|secrets?|password|api\s*key)",
+        r"show\s+(me\s+)?(your\s+)?(system\s+)?(prompt|instructions?|config)",
+
+        # Attack Vector 1: Fill-in-the-blank / Credential harvesting
+        r"fill\s+in\s*(the\s*)?(blank|blanks|___)",
+        r"password\s*[:=]\s*[_?]+",
+        r"api\s*key\s*[:=]\s*[_?]+",
+        r"database\s+at\s*[:=]\s*[_?]+",
+
+        # Attack Vector 2: Translation / Reformatting / System prompt dump
+        r"translate\s+(all\s+)?(your\s+)?(instructions?|system\s+prompt|rules?)",
+        r"output\s+(all\s+)?(your\s+)?(config|instructions?|prompt|system\s+prompt)\s+(as|in)\s+(json|yaml|xml)",
+        r"dump\s+(your\s+)?(config|system\s+prompt|instructions?)",
+
+        # Attack Vector 3: Hypothetical / Creative writing framing
+        r"(write\s+a\s+story|hypotheticall?y|in\s+this\s+story).*(system\s+prompt|configuration|credentials|secrets?|password|api\s*key)",
+
+        # Attack Vector 4: Confirmation / Side-channel / Knowledge probing
+        r"confirm\s+(that\s+)?(the\s+)?(admin\s+)?password",
+        r"\badmin123\b",
+        r"is\s+the\s+password\s+(admin123|\S+)",
+
+        # Attack Vector 5: Technical difficulty / Direct extraction of config
+        r"(provide|give|show|dump)\s+(me\s+)?(with\s+)?(the\s+|your\s+)?(system\s+prompt|configuration|internal\s+credentials|secrets?)",
+
+        # Vietnamese injection patterns
+        r"bỏ\s+qua\s+(mọi\s+)?hướng\s+dẫn",
+        r"quên\s+(mọi\s+)?hướng\s+dẫn",
+        r"tiết\s+lộ\s+(mật\s+khẩu|api|system\s*prompt|thông\s*tin\s*nội\s*bộ)",
+        r"cho\s+tôi\s+(xem\s+)?(mật\s+khẩu|system\s*prompt|api\s*key|cấu\s*hình)",
+        r"dịch\s+(toàn\s+bộ\s+)?hướng\s+dẫn",
     ]
 
     for pattern in INJECTION_PATTERNS:
-        if re.search(pattern, user_input, re.IGNORECASE):
+        if re.search(pattern, cleaned, re.IGNORECASE):
             return "BLOCK"
     return "ALLOW"
 
@@ -84,14 +124,22 @@ def topic_filter(user_input: str) -> InputStatus:
         ``"BLOCK"`` = chặn (off-topic hoặc topic cấm).
         ``"ALLOW"`` = cho qua (câu banking hợp lệ).
     """
+    import unicodedata
     input_lower = user_input.lower()
+    input_no_acc = "".join(
+        c for c in unicodedata.normalize("NFKD", input_lower) if not unicodedata.combining(c)
+    ).replace("đ", "d").replace("Đ", "D")
 
-    # TODO: Implement logic:
     # 1. If input contains any blocked topic -> return "BLOCK"
-    # 2. If input doesn't contain any allowed topic -> return "BLOCK"
-    # 3. Otherwise -> return "ALLOW"
+    for topic in BLOCKED_TOPICS:
+        if topic in input_lower or topic in input_no_acc:
+            return "BLOCK"
 
-    pass  # Replace with your implementation
+    # 2. If input doesn't contain any allowed topic -> return "BLOCK"
+    if not any(topic in input_lower or topic in input_no_acc for topic in ALLOWED_TOPICS):
+        return "BLOCK"
+
+    return "ALLOW"
 
 
 # ============================================================
@@ -151,7 +199,13 @@ class InputGuardrailPlugin(base_plugin.BasePlugin):
         #    - If "BLOCK": increment blocked_count, return self._block_response("...")
         # 3. If both return "ALLOW": return None (let message through)
 
-        pass  # Replace with your implementation
+        if detect_injection(text) == "BLOCK":
+            self.blocked_count += 1
+            return self._block_response("blocked.")
+        if topic_filter(text) == "BLOCK":
+            self.blocked_count += 1
+            return self._block_response("blocked.")
+        return None
 
 
 # ============================================================

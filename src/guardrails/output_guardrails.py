@@ -47,6 +47,15 @@ def content_filter(response: str) -> dict:
         # - National ID (CMND/CCCD): r"\b\d{9}\b|\b\d{12}\b"
         # - API key pattern: r"sk-[a-zA-Z0-9-]+"
         # - Password pattern: r"password\s*[:=]\s*\S+"
+        "phone": r"0\d{9,10}",
+        "email": r"[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}",
+        "national_id": r"\b\d{9}\b|\b\d{12}\b",
+        "api_key": r"sk-[a-zA-Z0-9-]+",
+        "password": r"password\s*(?:is|[:=]|\*\*|\*)\s*\S+",
+        "admin_password": r"\badmin123\b",
+        "internal_db": r"db\.vinbank\.internal(?::\d+)?",
+        "internal_host": r"\b[a-zA-Z0-9.-]+\.internal(?::\d+)?\b",
+        "system_instruction_leak": r"(?:You are a helpful VinBank staff assistant|red_agent_default|codename \"red_agent_default\")",
     }
 
     for name, pattern in PII_PATTERNS.items():
@@ -97,7 +106,11 @@ If UNSAFE, add a brief reason on the next line.
 #     instruction=SAFETY_JUDGE_INSTRUCTION,
 # )
 
-safety_judge_agent = None  # TODO: Replace with implementation
+safety_judge_agent = llm_agent.LlmAgent(
+    model="gemini-3-pro-preview",
+    name="safety_judge",
+    instruction=SAFETY_JUDGE_INSTRUCTION,
+)
 judge_runner = None
 
 
@@ -181,6 +194,22 @@ class OutputGuardrailPlugin(base_plugin.BasePlugin):
         #    - Increment self.blocked_count
         # 3. Return llm_response (possibly modified)
 
+        filtered = content_filter(response_text)
+        if filtered["issues"]:
+            llm_response.content = types.Content(
+                role="model",
+                parts=[types.Part.from_text(text=filtered["redacted"])],
+            )
+            self.redacted_count += 1
+
+        if self.use_llm_judge:
+            judge = llm_safety_check(response_text)
+            if not judge["safe"]:
+                llm_response.content = types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(text=judge["verdict"])],
+                )
+                self.blocked_count += 1
         return llm_response  # TODO: modify if needed
 
 

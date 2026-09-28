@@ -276,4 +276,5 @@ ALLOWED_TOPICS = [
 BLOCKED_TOPICS = [
     "hack", "exploit", "weapon", "drug", "illegal",
     "violence", "gambling", "bomb", "kill", "steal",
+    "recipe","cake","chocolate",
 ]
